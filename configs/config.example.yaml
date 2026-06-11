@@ -1,0 +1,207 @@
+server:
+  addr: ":8088"
+  read_header_timeout_sec: 5
+  read_timeout_sec: 20
+  write_timeout_sec: 20
+  idle_timeout_sec: 60
+
+auth:
+  api_key: "${NL2SQL_EXECUTOR_API_KEY}"
+
+# 多数据源核心配置。
+# OpenClaw 可以显式传 data_source_id；不传时按 routing.rules 自动路由，最后落到 default。
+datasources:
+  default: semantic_mart
+  items:
+    semantic_mart:
+      type: mysql
+      driver: mysql
+      description: "AI 问数优先入口：语义视图、物理宽表、DM 聚合表"
+      hosts:
+        - host: global-sg-bigdata-1
+          port: 9030
+        - host: global-sg-bigdata-2
+          port: 9030
+        - host: global-sg-bigdata-3
+          port: 9030
+      username_env: DB_USER
+      password_env: DB_PASSWORD
+      database: ""
+      charset: utf8mb4
+      params:
+        parseTime: "true"
+        loc: Local
+        timeout: 10s
+        readTimeout: 60s
+        writeTimeout: 60s
+      pool:
+        max_open_conns: 5
+        max_idle_conns: 2
+        conn_max_lifetime_sec: 300
+        conn_max_idle_time_sec: 120
+      execution:
+        max_concurrency: 2
+        query_timeout_sec: 45
+        max_rows: 1000
+        default_limit: 1000
+        host_failure_threshold: 3
+        host_cooldown_sec: 30
+      guard:
+        max_sql_bytes: 32768
+        require_schema_qualified_tables: true
+        require_limit: true
+        append_limit_if_missing: true
+        # semantic_mart 允许未来新增 ai_mart 视图/物理表；如果已把 ai_mart 写入 schema catalog，可改成 true。
+        enforce_known_tables: false
+        allow_cross_schema_join: true
+        allow_subquery: false
+        allow_explain: false
+        deny_raw_detail_tables_by_default: false
+        allowed_schemas:
+          - ai_mart
+          - global_dm
+          - global_dim
+          - international-data
+        denied_tables: []
+        large_tables:
+          - global_dw.dw_coins_trans
+          - international-player.coins_record
+          - international-game.card_record
+        require_time_for_tables:
+          - global_dw.dw_coins_trans
+          - international-player.coins_record
+          - international-game.card_record
+        time_column_hints:
+          - dt
+          - day
+          - date
+          - record_date
+          - user_event_date
+          - event_day_local
+          - utc_event_5min
+          - create_time
+          - update_time
+      pre_query_settings: []
+
+    bigdata_cluster:
+      type: mysql
+      driver: mysql
+      description: "默认大数据集群入口，支持跨库 schema.table 查询"
+      hosts:
+        - host: 10.16.57.159
+          port: 9030
+        - host: 10.16.57.179
+          port: 9030
+        - host: 10.16.52.229
+          port: 9030
+      username_env: DB_USER
+      password_env: DB_PASSWORD
+      database: ""
+      charset: utf8mb4
+      params:
+        parseTime: "true"
+        loc: Local
+        timeout: 10s
+        readTimeout: 60s
+        writeTimeout: 60s
+      pool:
+        max_open_conns: 4
+        max_idle_conns: 2
+        conn_max_lifetime_sec: 300
+        conn_max_idle_time_sec: 120
+      execution:
+        max_concurrency: 1
+        query_timeout_sec: 45
+        max_rows: 1000
+        default_limit: 1000
+        host_failure_threshold: 3
+        host_cooldown_sec: 30
+      guard:
+        max_sql_bytes: 32768
+        require_schema_qualified_tables: true
+        require_limit: true
+        append_limit_if_missing: true
+        enforce_known_tables: true
+        allow_cross_schema_join: true
+        allow_subquery: false
+        allow_explain: false
+        deny_raw_detail_tables_by_default: true
+        allowed_schemas:
+          - global_dm
+          - global_dw
+          - global_dim
+          - international-data
+          - international-player
+          - international-game
+          - international-finance
+          - international-system
+          - international-message
+          - international-activity
+          - international-tripartite-game
+          - international-tripartite-statistic
+          - international-dc-platform
+        denied_tables:
+          - international-player.coins_record
+          - international-game.card_record
+        large_tables:
+          - global_dw.dw_coins_trans
+          - international-player.coins_record
+          - international-game.card_record
+        require_where_for_tables:
+          - global_dw.dw_coins_trans
+        require_time_for_tables:
+          - global_dw.dw_coins_trans
+          - international-player.coins_record
+          - international-game.card_record
+        time_column_hints:
+          - dt
+          - day
+          - date
+          - record_date
+          - user_event_date
+          - event_day_local
+          - utc_event_5min
+          - create_time
+          - update_time
+      pre_query_settings: []
+
+routing:
+  rules:
+    - name: ai_mart_first
+      match_schemas: ["ai_mart"]
+      datasource: semantic_mart
+    - name: dm_and_data_to_semantic
+      match_schemas: ["global_dm", "global_dim", "international-data"]
+      datasource: semantic_mart
+    - name: dw_and_business_to_bigdata
+      match_schemas: ["global_dw", "international-player", "international-game", "international-finance", "international-system", "international-message", "international-activity", "international-tripartite-game", "international-tripartite-statistic", "international-dc-platform"]
+      datasource: bigdata_cluster
+
+queue:
+  workers: 6
+  buffer_size: 500
+  max_per_user_running: 1
+  notify_on_accepted: true
+  job_timeout_sec: 180
+
+telegram:
+  bot_token: "${TELEGRAM_BOT_TOKEN}"
+  base_url: "https://api.telegram.org"
+  message_chunk_size: 3500
+  max_inline_rows: 30
+  csv_compress_threshold_bytes: 524288
+  send_chart_svg: true
+  disable_notification: false
+
+storage:
+  data_dir: "./data"
+  cache_dir: "./data/cache"
+  result_dir: "./data/results"
+  job_dir: "./data/jobs"
+
+cache:
+  enabled: true
+  ttl_seconds: 300
+
+schema:
+  catalog_path: "./data/schema/openclaw_schema_catalog_compact.json"

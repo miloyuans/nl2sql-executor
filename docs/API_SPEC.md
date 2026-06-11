@@ -1,0 +1,75 @@
+# API Spec
+
+## 鉴权
+
+所有非 `/healthz` 接口必须携带：
+
+```http
+Authorization: Bearer <NL2SQL_EXECUTOR_API_KEY>
+```
+
+或：
+
+```http
+X-API-Key: <NL2SQL_EXECUTOR_API_KEY>
+```
+
+## POST /v1/query-jobs
+
+提交异步 SQL 查询任务。
+
+### Request
+
+```json
+{
+  "request_id": "tg-123456-001",
+  "user_id": "123456",
+  "chat_id": "123456",
+  "session_id": "telegram:123456",
+  "question": "最近7天按币种统计充值金额趋势",
+  "data_source_id": "semantic_mart",
+  "sql": "SELECT ... LIMIT 1000",
+  "chart_hint": {
+    "type": "line",
+    "x": "dt",
+    "y": ["recharge_amount"],
+    "series": "currency"
+  },
+  "cache_key": "optional-idempotent-cache-key"
+}
+```
+
+字段说明：
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `request_id` | 否 | 幂等任务 ID，建议 OpenClaw 生成 |
+| `user_id` | 是 | 当前 Telegram 用户 ID |
+| `chat_id` | 是 | Telegram 私聊 chat_id，结果会发到这里 |
+| `session_id` | 否 | 会话 ID |
+| `question` | 否 | 原始问题，用于结果标题 |
+| `data_source_id` | 否 | 不传则按 SQL 表名自动路由 |
+| `sql` | 是 | 模型生成的 SQL |
+| `chart_hint` | 否 | 图表建议 |
+| `cache_key` | 否 | 自定义缓存键 |
+
+### Response
+
+```json
+{
+  "job_id": "tg-123456-001",
+  "status": "queued"
+}
+```
+
+## GET /v1/jobs/{job_id}
+
+查询任务状态，只返回任务元信息，不返回查询结果。
+
+## GET /v1/datasources
+
+查看数据源状态、Host 冷却状态、并发配置。
+
+## GET /readyz
+
+检查所有数据源 Host 的 Ping 状态。
