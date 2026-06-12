@@ -12,8 +12,6 @@ data:
       write_timeout_sec: 20
       idle_timeout_sec: 60
 
-    auth:
-      api_key: "${NL2SQL_EXECUTOR_API_KEY}"
 
     datasources:
       default: semantic_mart

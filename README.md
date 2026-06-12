@@ -20,7 +20,6 @@
 ## 快速启动
 
 ```bash
-export NL2SQL_EXECUTOR_API_KEY='change-me-long-random'
 export DB_USER='your_db_user'
 export DB_PASSWORD='your_db_password'
 export TELEGRAM_BOT_TOKEN='123456:telegram-token'
@@ -35,7 +34,6 @@ CONFIG_PATH=configs/config.yaml ./bin/nl2sql-executor
 
 ```bash
 curl -X POST http://127.0.0.1:8088/v1/query-jobs \
-  -H "Authorization: Bearer $NL2SQL_EXECUTOR_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{
     "request_id":"tg-123456-001",
@@ -78,3 +76,8 @@ Kubernetes 内部调用地址示例：
 ```text
 http://nl2sql-executor.nl2sql.svc.cluster.local:8088/v1/query-jobs
 ```
+
+
+## 无鉴权接口说明
+
+当前版本已按需求移除 API Key/Bearer 鉴权。`POST /v1/query-jobs`、`GET /v1/datasources`、`GET /v1/jobs/{job_id}` 可直接从内网调用。生产部署时请通过 Kubernetes NetworkPolicy、Ingress 白名单、内网 Service 或网关 ACL 控制访问范围，避免公网暴露。

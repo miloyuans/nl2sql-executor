@@ -27,3 +27,6 @@
 4. 优先 `data_source_id=semantic_mart`。
 5. 不要把查询结果返回给模型。
 6. 如果用户请求涉及明细大表但没有时间范围，先让用户补充时间范围。
+
+
+> 当前版本已移除 API Key/Bearer 鉴权，接口可直接 POST 调用。请勿公网裸露服务，建议仅通过内网 Service、OpenClaw 所在网段、Ingress 白名单或网关 ACL 访问。

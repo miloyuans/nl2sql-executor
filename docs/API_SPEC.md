@@ -2,17 +2,7 @@
 
 ## 鉴权
 
-所有非 `/healthz` 接口必须携带：
-
-```http
-Authorization: Bearer <NL2SQL_EXECUTOR_API_KEY>
-```
-
-或：
-
-```http
-X-API-Key: <NL2SQL_EXECUTOR_API_KEY>
-```
+当前版本不启用 API Key/Bearer 鉴权。所有接口直接通过 HTTP 请求访问。建议只在内网、Kubernetes ClusterIP、OpenClaw 同 VPC 或受控网关后暴露。
 
 ## POST /v1/query-jobs
 

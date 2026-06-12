@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${NL2SQL_EXECUTOR_API_KEY:?need NL2SQL_EXECUTOR_API_KEY}"
 : "${DB_USER:?need DB_USER}"
 : "${DB_PASSWORD:?need DB_PASSWORD}"
 : "${TELEGRAM_BOT_TOKEN:?need TELEGRAM_BOT_TOKEN}"

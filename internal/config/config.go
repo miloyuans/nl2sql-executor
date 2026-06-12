@@ -12,7 +12,6 @@ import (
 
 type Config struct {
 	Server      ServerConfig      `yaml:"server"`
-	Auth        AuthConfig        `yaml:"auth"`
 	Datasources DatasourcesConfig `yaml:"datasources"`
 	Routing     RoutingConfig     `yaml:"routing"`
 	Queue       QueueConfig       `yaml:"queue"`
@@ -28,10 +27,6 @@ type ServerConfig struct {
 	ReadTimeoutSec       int    `yaml:"read_timeout_sec"`
 	WriteTimeoutSec      int    `yaml:"write_timeout_sec"`
 	IdleTimeoutSec       int    `yaml:"idle_timeout_sec"`
-}
-
-type AuthConfig struct {
-	APIKey string `yaml:"api_key"`
 }
 
 type DatasourcesConfig struct {
@@ -277,9 +272,6 @@ func applyDefaults(c *Config) {
 }
 
 func validate(c *Config) error {
-	if strings.TrimSpace(c.Auth.APIKey) == "" {
-		return errors.New("auth.api_key is required")
-	}
 	if len(c.Datasources.Items) == 0 {
 		return errors.New("datasources.items is required")
 	}

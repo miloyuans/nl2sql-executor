@@ -11,7 +11,6 @@ vi .env
 必须修改：
 
 ```bash
-NL2SQL_EXECUTOR_API_KEY=你的内部 API Key
 DB_USER=数据库只读账号
 DB_PASSWORD=数据库密码
 TELEGRAM_BOT_TOKEN=Telegram Bot Token
@@ -29,7 +28,7 @@ docker compose -f deploy/docker-compose/docker-compose.yml up -d --build
 
 ```bash
 curl http://127.0.0.1:8088/healthz
-curl -H "Authorization: Bearer $NL2SQL_EXECUTOR_API_KEY" http://127.0.0.1:8088/v1/datasources
+curl http://127.0.0.1:8088/v1/datasources
 ```
 
 ## 4. 查看日志
@@ -37,3 +36,6 @@ curl -H "Authorization: Bearer $NL2SQL_EXECUTOR_API_KEY" http://127.0.0.1:8088/v
 ```bash
 docker compose -f deploy/docker-compose/docker-compose.yml logs -f --tail=200
 ```
+
+
+> 当前版本已移除 API Key/Bearer 鉴权，接口可直接 POST 调用。请勿公网裸露服务，建议仅通过内网 Service、OpenClaw 所在网段、Ingress 白名单或网关 ACL 访问。

@@ -6,8 +6,6 @@ paths:
   /v1/query-jobs:
     post:
       summary: Submit async SQL query job
-      security:
-        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -36,8 +34,6 @@ paths:
   /v1/jobs/{job_id}:
     get:
       summary: Get job status
-      security:
-        - bearerAuth: []
       parameters:
         - in: path
           name: job_id
@@ -48,12 +44,5 @@ paths:
   /v1/datasources:
     get:
       summary: List datasource status
-      security:
-        - bearerAuth: []
       responses:
         '200': {description: datasource status}
-components:
-  securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer

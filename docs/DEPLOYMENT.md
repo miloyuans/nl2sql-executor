@@ -11,7 +11,6 @@ After=network-online.target
 Type=simple
 WorkingDirectory=/opt/nl2sql-executor
 Environment=CONFIG_PATH=/opt/nl2sql-executor/configs/config.yaml
-Environment=NL2SQL_EXECUTOR_API_KEY=change-me
 Environment=DB_USER=readonly_user
 Environment=DB_PASSWORD=change-me
 Environment=TELEGRAM_BOT_TOKEN=change-me
@@ -41,3 +40,6 @@ queue.max_per_user_running: 1
 ```
 
 上线后根据 Doris/StarRocks FE/BE 监控逐步调大。
+
+
+> 当前版本已移除 API Key/Bearer 鉴权，接口可直接 POST 调用。请勿公网裸露服务，建议仅通过内网 Service、OpenClaw 所在网段、Ingress 白名单或网关 ACL 访问。

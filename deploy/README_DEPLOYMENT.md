@@ -18,7 +18,7 @@
 2. 数据库账号必须是只读账号。
 3. API 只暴露给 OpenClaw 所在内网，不建议公网开放。
 4. 如果必须公网访问，请通过 Ingress、WAF、IP 白名单和 HTTPS 暴露。
-5. `NL2SQL_EXECUTOR_API_KEY`、`DB_PASSWORD`、`TELEGRAM_BOT_TOKEN` 必须放 Secret，不要写进镜像。
+5. `DB_PASSWORD`、`TELEGRAM_BOT_TOKEN` 必须放 Secret，不要写进镜像。
 6. `data/schema` 已打进镜像，PVC 只挂载 `cache/results/jobs`，不要把 PVC 直接挂到 `/app/data`，否则会覆盖镜像内置 schema 文件。
 
 ## Kubernetes 部署
@@ -83,7 +83,7 @@ kubectl -n nl2sql get pods
 kubectl -n nl2sql logs -f deploy/nl2sql-executor
 kubectl -n nl2sql port-forward svc/nl2sql-executor 8088:8088
 curl http://127.0.0.1:8088/healthz
-curl -H "Authorization: Bearer <你的 API Key>" http://127.0.0.1:8088/v1/datasources
+curl  http://127.0.0.1:8088/v1/datasources
 ```
 
 ## OpenClaw 调用地址
@@ -110,15 +110,14 @@ docker compose -f deploy/docker-compose/docker-compose.yml up -d --build
 
 ```bash
 curl http://127.0.0.1:8088/healthz
-curl -H "Authorization: Bearer <你的 API Key>" http://127.0.0.1:8088/v1/datasources
+curl  http://127.0.0.1:8088/v1/datasources
 ```
 
 ## 提交测试任务
 
 ```bash
 curl -X POST http://127.0.0.1:8088/v1/query-jobs \
-  -H "Authorization: Bearer <你的 API Key>" \
-  -H "Content-Type: application/json" \
+   -H "Content-Type: application/json" \
   -d '{
     "request_id": "test-001",
     "user_id": "123456",
@@ -132,3 +131,6 @@ curl -X POST http://127.0.0.1:8088/v1/query-jobs \
 ```
 
 注意：`chat_id` 必须是 Bot 可以私聊到的 Telegram 用户/会话 ID。
+
+
+> 当前版本已移除 API Key/Bearer 鉴权，接口可直接 POST 调用。请勿公网裸露服务，建议仅通过内网 Service、OpenClaw 所在网段、Ingress 白名单或网关 ACL 访问。

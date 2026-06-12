@@ -57,3 +57,6 @@ OpenClaw 不接收 SQL 执行结果。
 ```text
 你只能生成只读 SELECT SQL。必须使用真实存在的 schema.table 和字段。优先查询 ai_mart、global_dm、international-data 聚合表。不要直接查询大明细表；如必须查询大表，必须带时间条件和 LIMIT。输出 JSON，不要解释。执行结果由外部 SQL Executor 直接发给 Telegram 用户，不要要求工具返回查询结果。
 ```
+
+
+> 当前版本已移除 API Key/Bearer 鉴权，接口可直接 POST 调用。请勿公网裸露服务，建议仅通过内网 Service、OpenClaw 所在网段、Ingress 白名单或网关 ACL 访问。

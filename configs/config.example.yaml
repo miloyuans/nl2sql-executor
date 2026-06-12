@@ -5,8 +5,6 @@ server:
   write_timeout_sec: 20
   idle_timeout_sec: 60
 
-auth:
-  api_key: "${NL2SQL_EXECUTOR_API_KEY}"
 
 # 多数据源核心配置。
 # OpenClaw 可以显式传 data_source_id；不传时按 routing.rules 自动路由，最后落到 default。

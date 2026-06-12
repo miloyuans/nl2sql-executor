@@ -1,7 +1,6 @@
 package api
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -25,7 +24,7 @@ func NewServer(cfg *config.Config, mgr *job.Manager, ds *datasource.Manager) *Se
 	return s
 }
 
-func (s *Server) Router() http.Handler { return s.authMiddleware(s.mux) }
+func (s *Server) Router() http.Handler { return s.mux }
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("/healthz", s.health)
@@ -91,27 +90,6 @@ func (s *Server) getJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, j)
-}
-
-func (s *Server) authMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/healthz" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		key := r.Header.Get("X-API-Key")
-		if key == "" {
-			auth := r.Header.Get("Authorization")
-			if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
-				key = strings.TrimSpace(auth[7:])
-			}
-		}
-		if key == "" || subtle.ConstantTimeCompare([]byte(key), []byte(s.cfg.Auth.APIKey)) != 1 {
-			writeJSON(w, http.StatusUnauthorized, errResp("unauthorized"))
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
