@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nl2sql-executor
+  namespace: nl2sql
+  labels:
+    app: nl2sql-executor
+spec:
+  type: ClusterIP
+  selector:
+    app: nl2sql-executor
+  ports:
+    - name: http
+      port: 8088
+      targetPort: http

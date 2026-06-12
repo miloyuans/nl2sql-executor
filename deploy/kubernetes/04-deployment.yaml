@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nl2sql-executor
+  namespace: nl2sql
+  labels:
+    app: nl2sql-executor
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: nl2sql-executor
+  template:
+    metadata:
+      labels:
+        app: nl2sql-executor
+    spec:
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: nl2sql-executor
+          image: registry.example.com/nl2sql-executor:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8088
+          env:
+            - name: CONFIG_PATH
+              value: /app/configs/config.yaml
+            - name: TZ
+              value: Asia/Shanghai
+          envFrom:
+            - secretRef:
+                name: nl2sql-executor-secret
+          volumeMounts:
+            - name: config
+              mountPath: /app/configs/config.yaml
+              subPath: config.yaml
+              readOnly: true
+            - name: data
+              mountPath: /app/data/cache
+              subPath: cache
+            - name: data
+              mountPath: /app/data/results
+              subPath: results
+            - name: data
+              mountPath: /app/data/jobs
+              subPath: jobs
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 30
+            periodSeconds: 3
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 2
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+      volumes:
+        - name: config
+          configMap:
+            name: nl2sql-executor-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: nl2sql-executor-data

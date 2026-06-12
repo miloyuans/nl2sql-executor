@@ -64,3 +64,17 @@ API 只返回：
 3. `bigdata_cluster.execution.max_concurrency` 初始设为 1。
 4. 所有 OpenClaw 生成的 SQL 必须使用 `schema.table`。
 5. 为高频跨库关联查询创建 `ai_mart` 视图或物理宽表，再让模型优先查询 `ai_mart`。
+
+## 容器部署模板
+
+已内置部署模板：
+
+- `deploy/docker-compose/`：单机容器部署。
+- `deploy/kubernetes/`：Kubernetes Deployment / Service / PVC / ConfigMap / Secret 模板。
+- `deploy/README_DEPLOYMENT.md`：完整部署说明。
+
+Kubernetes 内部调用地址示例：
+
+```text
+http://nl2sql-executor.nl2sql.svc.cluster.local:8088/v1/query-jobs
+```

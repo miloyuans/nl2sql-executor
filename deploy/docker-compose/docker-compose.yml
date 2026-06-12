@@ -1,0 +1,36 @@
+services:
+  nl2sql-executor:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: nl2sql-executor:local
+    container_name: nl2sql-executor
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      CONFIG_PATH: /app/configs/config.yaml
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "8088:8088"
+    volumes:
+      - ./config.yaml:/app/configs/config.yaml:ro
+      - nl2sql-cache:/app/data/cache
+      - nl2sql-results:/app/data/results
+      - nl2sql-jobs:/app/data/jobs
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8088/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+volumes:
+  nl2sql-cache:
+  nl2sql-results:
+  nl2sql-jobs:

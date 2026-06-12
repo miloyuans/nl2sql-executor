@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - 00-namespace.yaml
+  - 01-secret.example.yaml
+  - 02-configmap.yaml
+  - 03-pvc.yaml
+  - 04-deployment.yaml
+  - 05-service.yaml
+# 需要外部暴露 API 给 OpenClaw 时再启用 Ingress。
+# - 06-ingress.example.yaml
