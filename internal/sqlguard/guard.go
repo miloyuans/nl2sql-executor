@@ -26,6 +26,8 @@ var tableRe = regexp.MustCompile(`(?i)\b(?:from|join)\s+((?:` + "`[^`]+`" + `|"[
 var limitRe = regexp.MustCompile(`(?i)\blimit\s+\d+\b`)
 var whereRe = regexp.MustCompile(`(?i)\bwhere\b`)
 var selectStartRe = regexp.MustCompile(`(?is)^\s*(?:explain\s+)?(?:select|with)\b`)
+var fencedSQLRe = regexp.MustCompile("(?is)```(?:sql)?\\s*(.*?)\\s*```")
+var cteNameRe = regexp.MustCompile(`(?is)(?:^\s*with(?:\s+recursive)?|,)\s*((?:` + "`[^`]+`" + `|"[^\"]+"|[a-zA-Z_][\w\-]*))\s+as\s*\(`)
 
 func ValidateAndRewrite(sqlText string, guard config.GuardConfig, cat *schema.Catalog, maxRows int, defaultLimit int) (CheckedSQL, error) {
 	if strings.TrimSpace(sqlText) == "" {
@@ -34,7 +36,7 @@ func ValidateAndRewrite(sqlText string, guard config.GuardConfig, cat *schema.Ca
 	if guard.MaxSQLBytes > 0 && len([]byte(sqlText)) > guard.MaxSQLBytes {
 		return CheckedSQL{}, fmt.Errorf("sql too large")
 	}
-	clean := stripComments(sqlText)
+	clean := stripComments(NormalizeSQLInput(sqlText))
 	clean = strings.TrimSpace(clean)
 	if clean == "" {
 		return CheckedSQL{}, fmt.Errorf("empty sql after removing comments")
@@ -109,6 +111,8 @@ func ValidateAndRewrite(sqlText string, guard config.GuardConfig, cat *schema.Ca
 }
 
 func ExtractTables(sqlText string) ([]TableRef, error) {
+	sqlText = stripComments(NormalizeSQLInput(sqlText))
+	cteNames := extractCTENames(sqlText)
 	matches := tableRe.FindAllStringSubmatch(sqlText, -1)
 	seen := map[string]bool{}
 	out := make([]TableRef, 0, len(matches))
@@ -128,6 +132,9 @@ func ExtractTables(sqlText string) ([]TableRef, error) {
 		if tableName == "" {
 			continue
 		}
+		if schemaName == "" && cteNames[strings.ToLower(tableName)] {
+			continue
+		}
 		full := strings.ToLower(schemaName + "." + tableName)
 		if schemaName == "" {
 			full = strings.ToLower(tableName)
@@ -138,6 +145,27 @@ func ExtractTables(sqlText string) ([]TableRef, error) {
 		}
 	}
 	return out, nil
+}
+
+func NormalizeSQLInput(sqlText string) string {
+	s := strings.TrimSpace(sqlText)
+	if m := fencedSQLRe.FindStringSubmatch(s); len(m) == 2 {
+		return strings.TrimSpace(m[1])
+	}
+	return s
+}
+
+func extractCTENames(sqlText string) map[string]bool {
+	out := map[string]bool{}
+	for _, m := range cteNameRe.FindAllStringSubmatch(sqlText, -1) {
+		if len(m) > 1 {
+			name := strings.ToLower(unquoteIdent(m[1]))
+			if name != "" {
+				out[name] = true
+			}
+		}
+	}
+	return out
 }
 
 func splitIdentifier(s string) []string {

@@ -87,11 +87,10 @@ func (m *Manager) Submit(req QueryRequest) (*Job, error) {
 	m.persist(j)
 	select {
 	case m.queue <- j:
-		if m.cfg.Queue.NotifyOnAccepted {
-			go func() {
-				_ = m.tg.SendMessage(context.Background(), req.ChatID, fmt.Sprintf("已收到查询任务，任务ID：%s，正在排队执行。", id))
-			}()
-		}
+		// Do not send Telegram progress here. The worker sends the first progress
+		// message synchronously before validation/execution. Sending from Submit in a
+		// goroutine can race with fast failures, causing users to see "failed" before
+		// "queued".
 		return j, nil
 	default:
 		m.setStatus(j, "rejected", "queue full")
@@ -134,6 +133,10 @@ func (m *Manager) process(parent context.Context, j *Job) {
 	ctx, cancel := context.WithTimeout(parent, time.Duration(m.cfg.Queue.JobTimeoutSec)*time.Second)
 	defer cancel()
 
+	if m.cfg.Queue.NotifyOnAccepted {
+		m.sendProgress(ctx, j, "已收到查询任务，任务ID："+j.ID+"，正在进行 SQL 安全校验，校验通过后会执行查询。")
+	}
+
 	m.setStatus(j, "validating", "")
 	dsID, err := m.selectDatasource(j.Request.DatasourceID, j.Request.SQL)
 	if err != nil {
@@ -174,6 +177,9 @@ func (m *Manager) process(parent context.Context, j *Job) {
 	}
 
 	m.setStatus(j, "running", "")
+	if m.cfg.Queue.NotifyOnAccepted {
+		m.sendProgress(ctx, j, fmt.Sprintf("SQL 安全校验通过，任务ID：%s，数据源：%s，正在执行查询。", j.ID, dsID))
+	}
 	result, err := m.ds.Query(ctx, dsID, checked.SQL)
 	if err != nil {
 		m.fail(ctx, j, fmt.Errorf("SQL 执行失败：%w", err))
@@ -185,7 +191,17 @@ func (m *Manager) process(parent context.Context, j *Job) {
 		title = j.ID
 	}
 	bundle := formatter.BuildText(title, result, m.cfg.Telegram.MaxInlineRows)
-	msg := bundle.Summary + "\n表：" + sqlguard.TablesDescription(checked.Tables) + "\n" + bundle.TableText
+	msg := bundle.Summary + "\n表：" + sqlguard.TablesDescription(checked.Tables)
+	if strings.TrimSpace(bundle.AnswerText) != "" {
+		msg += "\n\n结果：\n" + bundle.AnswerText
+		// KPI 类查询优先用业务可读结果，避免 Telegram 中大表格挤占首屏。
+		// 完整明细仍会通过 CSV 发送；多维明细或非聚合查询继续展示表格。
+		if result.RowCount > 20 {
+			msg += "\n" + bundle.TableText
+		}
+	} else {
+		msg += "\n" + bundle.TableText
+	}
 	for _, chunk := range formatter.SplitText(msg, m.cfg.Telegram.MessageChunkSize) {
 		if err := m.tg.SendMessage(ctx, j.Request.ChatID, chunk); err != nil {
 			log.Printf("send message: %v", err)
@@ -225,11 +241,50 @@ func (m *Manager) selectDatasource(requested string, sqlText string) (string, er
 		if rule.Datasource == "" {
 			continue
 		}
-		if matchesRule(rule, tables) {
+		if matchesRule(rule, tables) && m.datasourceAllowsTables(rule.Datasource, tables) {
 			return rule.Datasource, nil
 		}
 	}
-	return m.ds.DefaultID(), nil
+	defaultID := m.ds.DefaultID()
+	if m.datasourceAllowsTables(defaultID, tables) {
+		return defaultID, nil
+	}
+	for id := range m.cfg.Datasources.Items {
+		if m.datasourceAllowsTables(id, tables) {
+			return id, nil
+		}
+	}
+	return defaultID, nil
+}
+
+func (m *Manager) datasourceAllowsTables(datasourceID string, tables []sqlguard.TableRef) bool {
+	dsCfg, ok := m.ds.Config(datasourceID)
+	if !ok {
+		return false
+	}
+	allowedSchemas := toSet(dsCfg.Guard.AllowedSchemas)
+	allowedTables := toSet(dsCfg.Guard.AllowedTables)
+	deniedSchemas := toSet(dsCfg.Guard.DeniedSchemas)
+	deniedTables := toSet(dsCfg.Guard.DeniedTables)
+	for _, t := range tables {
+		schemaName := strings.ToLower(strings.Trim(t.Schema, " `\""))
+		fullName := strings.ToLower(strings.Trim(t.Schema+"."+t.Table, " `\""))
+		if schemaName != "" {
+			if deniedSchemas[schemaName] {
+				return false
+			}
+			if len(allowedSchemas) > 0 && !allowedSchemas[schemaName] {
+				return false
+			}
+		}
+		if deniedTables[fullName] {
+			return false
+		}
+		if len(allowedTables) > 0 && !allowedTables[fullName] {
+			return false
+		}
+	}
+	return true
 }
 
 func matchesRule(rule config.RoutingRule, tables []sqlguard.TableRef) bool {
@@ -277,10 +332,58 @@ func (m *Manager) releaseUser(user string) {
 	m.mu.Unlock()
 }
 
+func (m *Manager) sendProgress(ctx context.Context, j *Job, text string) {
+	if strings.TrimSpace(j.Request.ChatID) == "" {
+		return
+	}
+	for _, chunk := range formatter.SplitText(text, m.cfg.Telegram.MessageChunkSize) {
+		if err := m.tg.SendMessage(ctx, j.Request.ChatID, chunk); err != nil {
+			log.Printf("send progress for job %s: %v", j.ID, err)
+		}
+	}
+}
+
 func (m *Manager) fail(ctx context.Context, j *Job, err error) {
 	log.Printf("job %s failed: %v", j.ID, err)
-	_ = m.tg.SendMessage(ctx, j.Request.ChatID, fmt.Sprintf("查询任务失败：%s\n%s", j.ID, err.Error()))
+	m.sendProgress(ctx, j, m.failureMessage(j, err))
 	m.setStatus(j, "failed", err.Error())
+}
+
+func (m *Manager) failureMessage(j *Job, err error) string {
+	sqlText := strings.TrimSpace(j.RewrittenSQL)
+	if sqlText == "" {
+		sqlText = strings.TrimSpace(j.Request.SQL)
+	}
+	dsID := strings.TrimSpace(j.DatasourceID)
+	if dsID == "" {
+		dsID = strings.TrimSpace(j.Request.DatasourceID)
+	}
+	if dsID == "" {
+		dsID = "自动路由"
+	}
+
+	return fmt.Sprintf(
+		"查询任务失败：%s\n状态：%s\n数据源：%s\n错误原因：%s\n\n执行 SQL：\n%s",
+		j.ID,
+		classifyError(err),
+		dsID,
+		err.Error(),
+		sqlText,
+	)
+}
+
+func classifyError(err error) string {
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "unknown column") || strings.Contains(msg, "unknown table") || strings.Contains(msg, "no table found") || strings.Contains(msg, "table not found"):
+		return "SQL 结构错误：表或字段不存在"
+	case strings.Contains(msg, "sql 安全校验失败") || strings.Contains(msg, "only select") || strings.Contains(msg, "dangerous") || strings.Contains(msg, "denied"):
+		return "SQL 安全校验失败"
+	case strings.Contains(msg, "deadline exceeded") || strings.Contains(msg, "timeout"):
+		return "SQL 执行超时"
+	default:
+		return "SQL 执行失败"
+	}
 }
 
 func (m *Manager) setStatus(j *Job, status, errText string) {
