@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"nl2sql-executor-go-prod/internal/config"
@@ -12,14 +13,22 @@ import (
 )
 
 type Server struct {
-	cfg *config.Config
-	mgr *job.Manager
-	ds  *datasource.Manager
-	mux *http.ServeMux
+	cfg        *config.Config
+	mgr        *job.Manager
+	ds         *datasource.Manager
+	mux        *http.ServeMux
+	users      *adminUserStore
+	sessions   map[string]adminSession
+	sessionsMu sync.Mutex
 }
 
 func NewServer(cfg *config.Config, mgr *job.Manager, ds *datasource.Manager) *Server {
-	s := &Server{cfg: cfg, mgr: mgr, ds: ds, mux: http.NewServeMux()}
+	store := newAdminUserStore(cfg.Admin.Users.File)
+	_ = store.load()
+	if cfg.Admin.Auth.Enabled {
+		store.ensureBootstrap()
+	}
+	s := &Server{cfg: cfg, mgr: mgr, ds: ds, mux: http.NewServeMux(), users: store, sessions: map[string]adminSession{}}
 	s.routes()
 	return s
 }
@@ -31,11 +40,23 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/readyz", s.ready)
 	s.mux.HandleFunc("/", s.root)
 	s.mux.HandleFunc("/admin", s.adminIndex)
+	s.mux.HandleFunc("/admin/login", s.adminLoginPage)
+	s.mux.HandleFunc("/admin/sso/login", s.adminSSOLogin)
+	s.mux.HandleFunc("/admin/sso/callback", s.adminSSOCallback)
 	s.mux.HandleFunc("/v1/query-jobs", s.queryJobs)
 	s.mux.HandleFunc("/v1/jobs/", s.getJob)
 	s.mux.HandleFunc("/v1/admin/jobs", s.adminJobs)
 	s.mux.HandleFunc("/v1/admin/jobs/", s.adminJobAction)
 	s.mux.HandleFunc("/v1/admin/sql/execute", s.adminSQLExecute)
+	s.mux.HandleFunc("/v1/admin/users", s.adminUsers)
+	s.mux.HandleFunc("/v1/admin/users/", s.adminUserAction)
+	s.mux.HandleFunc("/v1/admin/settings", s.adminSettings)
+	s.mux.HandleFunc("/v1/admin/auth/login", s.adminAuthLogin)
+	s.mux.HandleFunc("/v1/admin/auth/logout", s.adminAuthLogout)
+	s.mux.HandleFunc("/v1/admin/auth/me", s.adminAuthMe)
+	s.mux.HandleFunc("/v1/admin/schema/export", s.adminSchemaExport)
+	s.mux.HandleFunc("/v1/admin/schema/exports", s.adminSchemaExports)
+	s.mux.HandleFunc("/v1/admin/schema/download", s.adminSchemaDownload)
 	s.mux.HandleFunc("/v1/datasources", s.datasources)
 }
 

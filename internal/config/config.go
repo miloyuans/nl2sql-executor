@@ -12,6 +12,7 @@ import (
 
 type Config struct {
 	Server      ServerConfig      `yaml:"server"`
+	Admin       AdminConfig       `yaml:"admin"`
 	Datasources DatasourcesConfig `yaml:"datasources"`
 	Routing     RoutingConfig     `yaml:"routing"`
 	Queue       QueueConfig       `yaml:"queue"`
@@ -19,6 +20,46 @@ type Config struct {
 	Storage     StorageConfig     `yaml:"storage"`
 	Cache       CacheConfig       `yaml:"cache"`
 	Schema      SchemaConfig      `yaml:"schema"`
+}
+
+// AdminConfig controls the optional management UI auth, SSO metadata and schema export defaults.
+// Auth and SSO are intentionally disabled by default so existing no-auth OpenClaw
+// integrations keep working unless operators explicitly enable them.
+type AdminConfig struct {
+	Auth         AdminAuthConfig         `yaml:"auth"`
+	SSO          AdminSSOConfig          `yaml:"sso"`
+	Users        AdminUsersConfig        `yaml:"users"`
+	SchemaExport AdminSchemaExportConfig `yaml:"schema_export"`
+}
+
+type AdminAuthConfig struct {
+	Enabled         bool   `yaml:"enabled"`
+	SessionTTLHours int    `yaml:"session_ttl_hours"`
+	CookieName      string `yaml:"cookie_name"`
+	AdminTokenEnv   string `yaml:"admin_token_env"`
+}
+
+type AdminSSOConfig struct {
+	Enabled      bool     `yaml:"enabled" json:"enabled"`
+	IssuerURL    string   `yaml:"issuer_url" json:"issuer_url"`
+	ClientID     string   `yaml:"client_id" json:"client_id"`
+	ClientSecret string   `yaml:"client_secret" json:"-"`
+	RedirectURL  string   `yaml:"redirect_url" json:"redirect_url"`
+	Scopes       string   `yaml:"scopes" json:"scopes"`
+	AdminUsers   []string `yaml:"admin_users" json:"admin_users"`
+	AdminRoles   []string `yaml:"admin_roles" json:"admin_roles"`
+	UserRoles    []string `yaml:"user_roles" json:"user_roles"`
+}
+
+type AdminUsersConfig struct {
+	File string `yaml:"file"`
+}
+
+type AdminSchemaExportConfig struct {
+	Dir                  string   `yaml:"dir"`
+	MaxRows              int      `yaml:"max_rows"`
+	IncludeSystemSchemas bool     `yaml:"include_system_schemas"`
+	SystemSchemas        []string `yaml:"system_schemas"`
 }
 
 type ServerConfig struct {
@@ -165,6 +206,36 @@ func Load(path string) (*Config, error) {
 }
 
 func applyDefaults(c *Config) {
+	if c.Admin.Auth.SessionTTLHours <= 0 {
+		c.Admin.Auth.SessionTTLHours = 12
+	}
+	if c.Admin.Auth.CookieName == "" {
+		c.Admin.Auth.CookieName = "openclaw_admin_session"
+	}
+	if c.Admin.Auth.AdminTokenEnv == "" {
+		c.Admin.Auth.AdminTokenEnv = "OPENCLAW_ADMIN_TOKEN"
+	}
+	if c.Admin.SSO.Scopes == "" {
+		c.Admin.SSO.Scopes = "openid profile email"
+	}
+	if len(c.Admin.SSO.AdminRoles) == 0 {
+		c.Admin.SSO.AdminRoles = []string{"admin", "openclaw-admin"}
+	}
+	if len(c.Admin.SSO.UserRoles) == 0 {
+		c.Admin.SSO.UserRoles = []string{"user", "openclaw-user"}
+	}
+	if c.Admin.Users.File == "" {
+		c.Admin.Users.File = c.Storage.DataDir + "/admin/users.json"
+	}
+	if c.Admin.SchemaExport.Dir == "" {
+		c.Admin.SchemaExport.Dir = c.Storage.DataDir + "/schema_exports"
+	}
+	if c.Admin.SchemaExport.MaxRows <= 0 {
+		c.Admin.SchemaExport.MaxRows = 200000
+	}
+	if len(c.Admin.SchemaExport.SystemSchemas) == 0 {
+		c.Admin.SchemaExport.SystemSchemas = []string{"information_schema", "mysql", "performance_schema", "sys", "__internal_schema"}
+	}
 	if c.Server.Addr == "" {
 		c.Server.Addr = ":8088"
 	}
@@ -215,6 +286,12 @@ func applyDefaults(c *Config) {
 	}
 	if c.Storage.JobDir == "" {
 		c.Storage.JobDir = c.Storage.DataDir + "/jobs"
+	}
+	if c.Admin.Users.File == "" || strings.HasPrefix(c.Admin.Users.File, "/admin/") {
+		c.Admin.Users.File = c.Storage.DataDir + "/admin/users.json"
+	}
+	if c.Admin.SchemaExport.Dir == "" || strings.HasPrefix(c.Admin.SchemaExport.Dir, "/schema_exports") {
+		c.Admin.SchemaExport.Dir = c.Storage.DataDir + "/schema_exports"
 	}
 	if c.Cache.TTLSeconds <= 0 {
 		c.Cache.TTLSeconds = 300
