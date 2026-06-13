@@ -6,9 +6,9 @@ server:
   idle_timeout_sec: 60
 admin:
   auth:
-    # 默认关闭本地后台认证，保持与现有 no-auth OpenClaw 调用兼容。
-    # 生产环境建议开启，并通过 OPENCLAW_ADMIN_INITIAL_PASSWORD 设置初始密码。
-    enabled: false
+    # 默认开启管理后台本地登录；默认账号 admin/admin，可用 OPENCLAW_ADMIN_INITIAL_PASSWORD 覆盖。
+    # 登录会随服务重启失效，默认 12 小时自动过期。
+    enabled: true
     session_ttl_hours: 12
     cookie_name: openclaw_admin_session
     admin_token_env: OPENCLAW_ADMIN_TOKEN

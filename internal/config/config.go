@@ -37,6 +37,25 @@ type AdminAuthConfig struct {
 	SessionTTLHours int    `yaml:"session_ttl_hours"`
 	CookieName      string `yaml:"cookie_name"`
 	AdminTokenEnv   string `yaml:"admin_token_env"`
+	enabledSet      bool
+}
+
+func (a *AdminAuthConfig) UnmarshalYAML(value *yaml.Node) error {
+	type rawAdminAuthConfig AdminAuthConfig
+	var raw rawAdminAuthConfig
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	*a = AdminAuthConfig(raw)
+	if value.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(value.Content); i += 2 {
+			if value.Content[i].Value == "enabled" {
+				a.enabledSet = true
+				break
+			}
+		}
+	}
+	return nil
 }
 
 type AdminSSOConfig struct {
@@ -206,6 +225,9 @@ func Load(path string) (*Config, error) {
 }
 
 func applyDefaults(c *Config) {
+	if !c.Admin.Auth.enabledSet {
+		c.Admin.Auth.Enabled = true
+	}
 	if c.Admin.Auth.SessionTTLHours <= 0 {
 		c.Admin.Auth.SessionTTLHours = 12
 	}

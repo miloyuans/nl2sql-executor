@@ -4,6 +4,41 @@ server:
   read_timeout_sec: 20
   write_timeout_sec: 20
   idle_timeout_sec: 60
+admin:
+  auth:
+    # 管理后台默认开启本地登录，默认账号 admin/admin。
+    # 登录会随服务重启失效，默认 12 小时自动过期。
+    enabled: true
+    session_ttl_hours: 12
+    cookie_name: openclaw_admin_session
+    admin_token_env: OPENCLAW_ADMIN_TOKEN
+  sso:
+    # SSO/OIDC 默认关闭。
+    enabled: false
+    issuer_url: ''
+    client_id: ''
+    client_secret: ''
+    redirect_url: ''
+    scopes: openid profile email
+    admin_users: []
+    admin_roles:
+    - admin
+    - openclaw-admin
+    user_roles:
+    - user
+    - openclaw-user
+  users:
+    file: /app/data/admin/users.json
+  schema_export:
+    dir: /app/data/schema_exports
+    max_rows: 200000
+    include_system_schemas: false
+    system_schemas:
+    - information_schema
+    - mysql
+    - performance_schema
+    - sys
+    - __internal_schema
 datasources:
   default: bigdata_cluster
   items:

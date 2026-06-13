@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -91,9 +92,11 @@ func (s *Server) adminAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	u, ok := s.users.authenticate(req.Username, req.Password)
 	if !ok {
+		log.Printf("admin login failed username=%s remote=%s", req.Username, r.RemoteAddr)
 		writeJSON(w, http.StatusUnauthorized, errResp("用户名或密码错误"))
 		return
 	}
+	log.Printf("admin login success username=%s remote=%s", u.Username, r.RemoteAddr)
 	s.createSession(w, r, u)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": u})
 }
@@ -232,6 +235,7 @@ func (s *Server) adminSchemaExport(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(maxInt(s.cfg.Queue.JobTimeoutSec, 300))*time.Second)
 	defer cancel()
+	log.Printf("admin schema export start datasource=%s include_system_schemas=%t", dsID, req.IncludeSystemSchemas || s.cfg.Admin.SchemaExport.IncludeSystemSchemas)
 	exp, err := s.ds.ExportSchema(ctx, dsID, datasource.SchemaExportOptions{IncludeSystemSchemas: req.IncludeSystemSchemas || s.cfg.Admin.SchemaExport.IncludeSystemSchemas, SystemSchemas: s.cfg.Admin.SchemaExport.SystemSchemas, MaxRows: s.cfg.Admin.SchemaExport.MaxRows})
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, errResp(err.Error()))
@@ -242,6 +246,7 @@ func (s *Server) adminSchemaExport(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errResp(err.Error()))
 		return
 	}
+	log.Printf("admin schema export complete datasource=%s json=%s markdown=%s db=%d table=%d view=%d column=%d index=%d warnings=%d", dsID, filepath.Base(jsonPath), filepath.Base(mdPath), exp.Summary.DatabaseCount, exp.Summary.TableCount, exp.Summary.ViewCount, exp.Summary.ColumnCount, exp.Summary.IndexCount, len(exp.Errors))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"summary":               exp.Summary,
 		"errors":                exp.Errors,
@@ -284,7 +289,22 @@ func (s *Server) adminSchemaDownload(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errResp("file is required"))
 		return
 	}
-	http.ServeFile(w, r, filepath.Join(s.cfg.Admin.SchemaExport.Dir, name))
+	path := filepath.Join(s.cfg.Admin.SchemaExport.Dir, name)
+	if _, err := os.Stat(path); err != nil {
+		writeJSON(w, http.StatusNotFound, errResp("file not found"))
+		return
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if strings.HasSuffix(strings.ToLower(name), ".json") {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	} else if strings.HasSuffix(strings.ToLower(name), ".md") {
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	} else {
+		w.Header().Set("Content-Type", "application/octet-stream")
+	}
+	log.Printf("admin schema download file=%s", name)
+	http.ServeFile(w, r, path)
 }
 
 func writeSchemaExportFiles(dir string, exp *datasource.SchemaExport) (string, string, error) {

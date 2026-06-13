@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -33,7 +34,40 @@ func NewServer(cfg *config.Config, mgr *job.Manager, ds *datasource.Manager) *Se
 	return s
 }
 
-func (s *Server) Router() http.Handler { return s.mux }
+func (s *Server) Router() http.Handler { return s.logRequests(s.mux) }
+
+type responseRecorder struct {
+	http.ResponseWriter
+	status int
+	bytes  int
+}
+
+func (r *responseRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *responseRecorder) Write(b []byte) (int, error) {
+	if r.status == 0 {
+		r.status = http.StatusOK
+	}
+	n, err := r.ResponseWriter.Write(b)
+	r.bytes += n
+	return n, err
+}
+
+func (s *Server) logRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		rw := &responseRecorder{ResponseWriter: w}
+		next.ServeHTTP(rw, r)
+		status := rw.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		log.Printf("http method=%s path=%s status=%d bytes=%d duration_ms=%d remote=%s", r.Method, r.URL.RequestURI(), status, rw.bytes, time.Since(started).Milliseconds(), r.RemoteAddr)
+	})
+}
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("/healthz", s.health)
