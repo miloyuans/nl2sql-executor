@@ -191,7 +191,7 @@ data:
       workers: 6
       buffer_size: 500
       max_per_user_running: 1
-      notify_on_accepted: true
+      notify_on_accepted: false
       job_timeout_sec: 180
     telegram:
       bot_token: ${TELEGRAM_BOT_TOKEN}
@@ -199,7 +199,9 @@ data:
       message_chunk_size: 3500
       max_inline_rows: 30
       csv_compress_threshold_bytes: 524288
-      send_chart_svg: true
+      compact_result_only: true
+      send_csv: false
+      send_chart_svg: false
       disable_notification: false
     storage:
       data_dir: /app/data

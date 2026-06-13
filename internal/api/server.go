@@ -29,9 +29,22 @@ func (s *Server) Router() http.Handler { return s.mux }
 func (s *Server) routes() {
 	s.mux.HandleFunc("/healthz", s.health)
 	s.mux.HandleFunc("/readyz", s.ready)
+	s.mux.HandleFunc("/", s.root)
+	s.mux.HandleFunc("/admin", s.adminIndex)
 	s.mux.HandleFunc("/v1/query-jobs", s.queryJobs)
 	s.mux.HandleFunc("/v1/jobs/", s.getJob)
+	s.mux.HandleFunc("/v1/admin/jobs", s.adminJobs)
+	s.mux.HandleFunc("/v1/admin/jobs/", s.adminJobAction)
+	s.mux.HandleFunc("/v1/admin/sql/execute", s.adminSQLExecute)
 	s.mux.HandleFunc("/v1/datasources", s.datasources)
+}
+
+func (s *Server) root(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/" {
+		http.Redirect(w, r, "/admin", http.StatusFound)
+		return
+	}
+	http.NotFound(w, r)
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {

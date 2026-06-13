@@ -63,3 +63,46 @@
 ## GET /readyz
 
 检查所有数据源 Host 的 Ping 状态。
+
+## Admin UI and Debug APIs
+
+### GET /admin
+
+返回管理后台 HTML 页面。页面支持任务列表、任务详情、重跑任务、手动 SQL 查询并发送给指定 Telegram 用户。
+
+### GET /v1/admin/jobs
+
+查询任务列表。
+
+Query 参数：
+
+- `status`：可选，按任务状态过滤。
+- `q`：可选，按任务 ID、用户、SQL、错误、结果内容搜索。
+- `limit`：可选，默认 50，最大 200。
+- `offset`：可选，默认 0。
+
+### GET /v1/admin/jobs/{job_id}
+
+查询任务详情，包含原始 SQL、重写后的执行 SQL、结果预览、事件记录等。
+
+### POST /v1/admin/jobs/{job_id}/rerun
+
+重新执行指定任务，并使用原任务的 `chat_id` 发送结果给原用户。重跑任务会自动清空 `request_id` 和 `cache_key`。
+
+### POST /v1/admin/sql/execute
+
+手动执行 SQL。
+
+请求体示例：
+
+```json
+{
+  "data_source_id": "semantic_mart",
+  "chat_id": "7997315413",
+  "user_id": "7997315413",
+  "question": "手动排查昨日美国VPBET充值提现",
+  "sql": "SELECT ..."
+}
+```
+
+如果 `chat_id` 为空但 `user_id` 不为空，会使用 `user_id` 作为 Telegram 私聊发送目标。

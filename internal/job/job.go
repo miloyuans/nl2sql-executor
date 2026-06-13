@@ -17,6 +17,7 @@ import (
 	"nl2sql-executor-go-prod/internal/chart"
 	"nl2sql-executor-go-prod/internal/config"
 	"nl2sql-executor-go-prod/internal/datasource"
+	"nl2sql-executor-go-prod/internal/dbresult"
 	"nl2sql-executor-go-prod/internal/formatter"
 	"nl2sql-executor-go-prod/internal/schema"
 	"nl2sql-executor-go-prod/internal/sqlguard"
@@ -35,6 +36,12 @@ type QueryRequest struct {
 	CacheKey     string     `json:"cache_key"`
 }
 
+type JobEvent struct {
+	At      time.Time `json:"at"`
+	Type    string    `json:"type"`
+	Message string    `json:"message,omitempty"`
+}
+
 type Job struct {
 	ID             string              `json:"id"`
 	Request        QueryRequest        `json:"request"`
@@ -43,6 +50,14 @@ type Job struct {
 	RewrittenSQL   string              `json:"rewritten_sql,omitempty"`
 	Status         string              `json:"status"`
 	Error          string              `json:"error,omitempty"`
+	ResultText     string              `json:"result_text,omitempty"`
+	ResultTable    string              `json:"result_table,omitempty"`
+	ResultCSVPath  string              `json:"result_csv_path,omitempty"`
+	ResultColumns  []string            `json:"result_columns,omitempty"`
+	ResultRows     [][]string          `json:"result_rows,omitempty"`
+	ResultRowCount int                 `json:"result_row_count,omitempty"`
+	ResultDuration int64               `json:"result_duration_ms,omitempty"`
+	Events         []JobEvent          `json:"events,omitempty"`
 	CreatedAt      time.Time           `json:"created_at"`
 	UpdatedAt      time.Time           `json:"updated_at"`
 }
@@ -81,7 +96,8 @@ func (m *Manager) Submit(req QueryRequest) (*Job, error) {
 		m.mu.Unlock()
 		return existing, nil
 	}
-	j := &Job{ID: id, Request: req, Status: "queued", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	now := time.Now()
+	j := &Job{ID: id, Request: req, Status: "queued", CreatedAt: now, UpdatedAt: now, Events: []JobEvent{{At: now, Type: "queued", Message: "任务已进入队列"}}}
 	m.jobs[id] = j
 	m.mu.Unlock()
 	m.persist(j)
@@ -96,13 +112,6 @@ func (m *Manager) Submit(req QueryRequest) (*Job, error) {
 		m.setStatus(j, "rejected", "queue full")
 		return j, fmt.Errorf("queue full")
 	}
-}
-
-func (m *Manager) Get(id string) (*Job, bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	j, ok := m.jobs[id]
-	return j, ok
 }
 
 func (m *Manager) worker(ctx context.Context, workerID int) {
@@ -133,7 +142,7 @@ func (m *Manager) process(parent context.Context, j *Job) {
 	ctx, cancel := context.WithTimeout(parent, time.Duration(m.cfg.Queue.JobTimeoutSec)*time.Second)
 	defer cancel()
 
-	if m.cfg.Queue.NotifyOnAccepted {
+	if m.cfg.Queue.NotifyOnAccepted && !m.cfg.Telegram.IsCompactResultOnly() {
 		m.sendProgress(ctx, j, "已收到查询任务，任务ID："+j.ID+"，正在进行 SQL 安全校验，校验通过后会执行查询。")
 	}
 
@@ -164,20 +173,16 @@ func (m *Manager) process(parent context.Context, j *Job) {
 	}
 	if m.cfg.Cache.Enabled {
 		if e, ok := m.cache.Get(cacheKey); ok {
-			_ = m.tg.SendMessage(ctx, j.Request.ChatID, "命中缓存结果：\n"+e.Summary)
-			if e.ChartPath != "" {
-				_ = m.tg.SendDocument(ctx, j.Request.ChatID, e.ChartPath, "缓存图表")
-			}
-			if e.CSVPath != "" {
-				_ = m.tg.SendDocument(ctx, j.Request.ChatID, e.CSVPath, "缓存完整结果")
-			}
+			msg := buildTelegramResultMessage(checked.SQL, e.Summary)
+			m.setCachedResult(j, e.Summary)
+			m.sendResultMessage(ctx, j, msg)
 			m.setStatus(j, "sent_cached", "")
 			return
 		}
 	}
 
 	m.setStatus(j, "running", "")
-	if m.cfg.Queue.NotifyOnAccepted {
+	if m.cfg.Queue.NotifyOnAccepted && !m.cfg.Telegram.IsCompactResultOnly() {
 		m.sendProgress(ctx, j, fmt.Sprintf("SQL 安全校验通过，任务ID：%s，数据源：%s，正在执行查询。", j.ID, dsID))
 	}
 	result, err := m.ds.Query(ctx, dsID, checked.SQL)
@@ -191,25 +196,19 @@ func (m *Manager) process(parent context.Context, j *Job) {
 		title = j.ID
 	}
 	bundle := formatter.BuildText(title, result, m.cfg.Telegram.MaxInlineRows)
-	msg := bundle.Summary + "\n表：" + sqlguard.TablesDescription(checked.Tables)
-	if strings.TrimSpace(bundle.AnswerText) != "" {
-		msg += "\n\n结果：\n" + bundle.AnswerText
-		// KPI 类查询优先用业务可读结果，避免 Telegram 中大表格挤占首屏。
-		// 完整明细仍会通过 CSV 发送；多维明细或非聚合查询继续展示表格。
-		if result.RowCount > 20 {
-			msg += "\n" + bundle.TableText
-		}
-	} else {
-		msg += "\n" + bundle.TableText
+	resultText := strings.TrimSpace(bundle.AnswerText)
+	if resultText == "" {
+		resultText = strings.TrimSpace(bundle.TableText)
 	}
-	for _, chunk := range formatter.SplitText(msg, m.cfg.Telegram.MessageChunkSize) {
-		if err := m.tg.SendMessage(ctx, j.Request.ChatID, chunk); err != nil {
-			log.Printf("send message: %v", err)
-		}
+	if resultText == "" {
+		resultText = "无查询结果"
 	}
+	msg := buildTelegramResultMessage(checked.SQL, resultText)
+	m.setResult(j, result, resultText, bundle.TableText, "")
+	m.sendResultMessage(ctx, j, msg)
 
 	var chartPath string
-	if m.cfg.Telegram.SendChartSVG {
+	if !m.cfg.Telegram.IsCompactResultOnly() && m.cfg.Telegram.SendChartSVG {
 		if p, ok, err := chart.WriteSVG(m.cfg.Storage.ResultDir, j.ID, title, result, j.Request.ChartHint); err == nil && ok {
 			chartPath = p
 			_ = m.tg.SendDocument(ctx, j.Request.ChatID, p, "自动生成图表 SVG")
@@ -217,14 +216,18 @@ func (m *Manager) process(parent context.Context, j *Job) {
 			log.Printf("write chart: %v", err)
 		}
 	}
-	csvPath, err := formatter.WriteCSV(m.cfg.Storage.ResultDir, j.ID, result, m.cfg.Telegram.CSVCompressThreshold)
-	if err == nil {
-		_ = m.tg.SendDocument(ctx, j.Request.ChatID, csvPath, "完整查询结果 CSV")
-	} else {
-		log.Printf("write csv: %v", err)
+	var csvPath string
+	if m.cfg.Telegram.SendCSV {
+		if p, err := formatter.WriteCSV(m.cfg.Storage.ResultDir, j.ID, result, m.cfg.Telegram.CSVCompressThreshold); err == nil {
+			csvPath = p
+			m.setResultCSVPath(j, csvPath)
+			_ = m.tg.SendDocument(ctx, j.Request.ChatID, csvPath, "完整查询结果 CSV")
+		} else {
+			log.Printf("write csv: %v", err)
+		}
 	}
 	if m.cfg.Cache.Enabled {
-		_ = m.cache.Set(cache.Entry{Key: cacheKey, Summary: bundle.Summary, CSVPath: csvPath, ChartPath: chartPath})
+		_ = m.cache.Set(cache.Entry{Key: cacheKey, Summary: resultText, CSVPath: csvPath, ChartPath: chartPath})
 	}
 	m.setStatus(j, "sent", "")
 }
@@ -354,22 +357,77 @@ func (m *Manager) failureMessage(j *Job, err error) string {
 	if sqlText == "" {
 		sqlText = strings.TrimSpace(j.Request.SQL)
 	}
-	dsID := strings.TrimSpace(j.DatasourceID)
-	if dsID == "" {
-		dsID = strings.TrimSpace(j.Request.DatasourceID)
-	}
-	if dsID == "" {
-		dsID = "自动路由"
-	}
+	return buildTelegramResultMessage(sqlText, "查询失败："+classifyError(err)+"\n错误原因："+err.Error())
+}
 
-	return fmt.Sprintf(
-		"查询任务失败：%s\n状态：%s\n数据源：%s\n错误原因：%s\n\n执行 SQL：\n%s",
-		j.ID,
-		classifyError(err),
-		dsID,
-		err.Error(),
-		sqlText,
-	)
+func buildTelegramResultMessage(sqlText string, resultText string) string {
+	sqlText = strings.TrimSpace(sqlText)
+	if sqlText == "" {
+		sqlText = "未获取到 SQL"
+	}
+	resultText = strings.TrimSpace(resultText)
+	if resultText == "" {
+		resultText = "无查询结果"
+	}
+	return "🔎 查询语句\n" + sqlText + "\n\n📊 查询结果\n" + resultText
+}
+
+func (m *Manager) sendResultMessage(ctx context.Context, j *Job, msg string) {
+	if strings.TrimSpace(j.Request.ChatID) == "" {
+		return
+	}
+	for _, chunk := range formatter.SplitText(msg, m.cfg.Telegram.MessageChunkSize) {
+		if err := m.tg.SendMessage(ctx, j.Request.ChatID, chunk); err != nil {
+			log.Printf("send message: %v", err)
+		}
+	}
+}
+
+func (m *Manager) setCachedResult(j *Job, resultText string) {
+	m.mu.Lock()
+	j.ResultText = resultText
+	j.UpdatedAt = time.Now()
+	j.Events = append(j.Events, JobEvent{At: j.UpdatedAt, Type: "cache_hit", Message: "命中缓存并发送结果"})
+	m.mu.Unlock()
+	m.persist(j)
+}
+
+func (m *Manager) setResult(j *Job, result *dbresult.Result, resultText string, tableText string, csvPath string) {
+	m.mu.Lock()
+	j.ResultText = resultText
+	j.ResultTable = tableText
+	j.ResultCSVPath = csvPath
+	if result != nil {
+		j.ResultColumns = append([]string(nil), result.Columns...)
+		previewRows := result.Rows
+		if len(previewRows) > 100 {
+			previewRows = previewRows[:100]
+		}
+		j.ResultRows = cloneRows(previewRows)
+		j.ResultRowCount = result.RowCount
+		j.ResultDuration = result.DurationMS
+	}
+	j.UpdatedAt = time.Now()
+	j.Events = append(j.Events, JobEvent{At: j.UpdatedAt, Type: "result_ready", Message: fmt.Sprintf("返回 %d 行", j.ResultRowCount)})
+	m.mu.Unlock()
+	m.persist(j)
+}
+
+func (m *Manager) setResultCSVPath(j *Job, csvPath string) {
+	m.mu.Lock()
+	j.ResultCSVPath = csvPath
+	j.UpdatedAt = time.Now()
+	j.Events = append(j.Events, JobEvent{At: j.UpdatedAt, Type: "csv_ready", Message: csvPath})
+	m.mu.Unlock()
+	m.persist(j)
+}
+
+func cloneRows(in [][]string) [][]string {
+	out := make([][]string, len(in))
+	for i, r := range in {
+		out[i] = append([]string(nil), r...)
+	}
+	return out
 }
 
 func classifyError(err error) string {
@@ -388,10 +446,15 @@ func classifyError(err error) string {
 
 func (m *Manager) setStatus(j *Job, status, errText string) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	j.Status = status
 	j.Error = errText
 	j.UpdatedAt = time.Now()
+	message := status
+	if strings.TrimSpace(errText) != "" {
+		message = errText
+	}
+	j.Events = append(j.Events, JobEvent{At: j.UpdatedAt, Type: status, Message: message})
+	m.mu.Unlock()
 	m.persist(j)
 }
 

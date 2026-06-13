@@ -81,3 +81,7 @@ http://nl2sql-executor.nl2sql.svc.cluster.local:8088/v1/query-jobs
 ## 无鉴权接口说明
 
 当前版本已按需求移除 API Key/Bearer 鉴权。`POST /v1/query-jobs`、`GET /v1/datasources`、`GET /v1/jobs/{job_id}` 可直接从内网调用。生产部署时请通过 Kubernetes NetworkPolicy、Ingress 白名单、内网 Service 或网关 ACL 控制访问范围，避免公网暴露。
+
+## 管理后台
+
+本版本提供轻量级管理后台：`/admin`。可查看任务事件、执行 SQL、结果预览，支持重跑任务，以及手动输入 SQL 查询并发送到指定 Telegram 用户。详情见 [docs/ADMIN_UI.md](docs/ADMIN_UI.md)。

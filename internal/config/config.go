@@ -119,8 +119,16 @@ type TelegramConfig struct {
 	MessageChunkSize     int    `yaml:"message_chunk_size"`
 	MaxInlineRows        int    `yaml:"max_inline_rows"`
 	CSVCompressThreshold int    `yaml:"csv_compress_threshold_bytes"`
-	SendChartSVG         bool   `yaml:"send_chart_svg"`
-	DisableNotification  bool   `yaml:"disable_notification"`
+	// CompactResultOnly defaults to true when omitted. In compact mode Telegram
+	// notifications only include the executed SQL and the formatted result.
+	CompactResultOnly   *bool `yaml:"compact_result_only"`
+	SendCSV             bool  `yaml:"send_csv"`
+	SendChartSVG        bool  `yaml:"send_chart_svg"`
+	DisableNotification bool  `yaml:"disable_notification"`
+}
+
+func (t TelegramConfig) IsCompactResultOnly() bool {
+	return t.CompactResultOnly == nil || *t.CompactResultOnly
 }
 
 type StorageConfig struct {
